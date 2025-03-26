@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "express": "^4.21.2",
+    "twilio": "^5.5.1"
+  },
+  "scripts": {
+    "dev": "node index.js"
+  }
+}
