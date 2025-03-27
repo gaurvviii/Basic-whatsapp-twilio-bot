@@ -1,3 +1,4 @@
+require('dotenv').config();
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = require('twilio')(accountSid, authToken);
@@ -28,7 +29,17 @@ function calculateOffer(buffPrice, percentage = DEFAULT_PERCENTAGE, exchangeRate
     return (buffPrice * percentage) / exchangeRate;
 }
 
+// Function to format calculation result
+function formatCalculation(buffPrice, percentage, exchangeRate, offer) {
+    return `Buff Price: ${buffPrice}\nPercentage: ${(percentage * 100).toFixed(1)}%\nExchange Rate: ${exchangeRate}\nOffer: SGD ${offer.toFixed(2)}\n`;
+}
+
 app.post('/twilio-webhook', (req, res) => {
+    console.log('Received webhook request:', {
+        headers: req.headers,
+        body: req.body
+    });
+    
     // Check if this is a status callback
     if (req.body && req.body.MessageStatus) {
         console.log(`Message ${req.body.MessageSid} status: ${req.body.MessageStatus}`);
@@ -49,31 +60,54 @@ app.post('/twilio-webhook', (req, res) => {
 
     // Check if the message starts with /calculate
     if (incomingMsg.startsWith('/calculate')) {
-        const parts = incomingMsg.split(' ').filter(part => part.trim() !== '');
+        const lines = incomingMsg.split('\n').map(line => line.trim());
+        let calculations = [];
+        let currentExchangeRate = DEFAULT_EXCHANGE_RATE;
+        let currentPercentage = DEFAULT_PERCENTAGE;
+
+        // Process first line for potential parameters
+        const firstLine = lines[0].split(' ').filter(part => part.trim() !== '');
         
-        if (parts.length >= 2) {
-            const buffPrice = parseFloat(parts[1]);
-            
-            // Check if a custom percentage is provided
-            let percentage = DEFAULT_PERCENTAGE;
-            if (parts.length >= 3) {
-                const customPercentage = parseFloat(parts[2]) / 100;
-                if (!isNaN(customPercentage) && customPercentage > 0 && customPercentage <= 1) {
-                    percentage = customPercentage;
-                }
+        // Check for exchange rate parameter (e.g., /calculate rate=5.45)
+        const rateParam = firstLine.find(param => param.toLowerCase().startsWith('rate='));
+        if (rateParam) {
+            const rate = parseFloat(rateParam.split('=')[1]);
+            if (!isNaN(rate) && rate > 0) {
+                currentExchangeRate = rate;
             }
-            
-            if (!isNaN(buffPrice) && buffPrice > 0) {
-                const offer = calculateOffer(buffPrice, percentage);
-                responseMsg = `*Price Calculation*\n\nBuff Price: ${buffPrice}\nPercentage: ${(percentage * 100).toFixed(1)}%\nExchange Rate: ${DEFAULT_EXCHANGE_RATE}\n\nOffer: SGD ${offer.toFixed(2)}`;
-            } else {
-                responseMsg = 'Please provide a valid price. Example: /calculate 15000 or /calculate 15000 92.5';
+        }
+
+        // Check for percentage parameter (e.g., /calculate p=92.5)
+        const percentParam = firstLine.find(param => param.toLowerCase().startsWith('p='));
+        if (percentParam) {
+            const percent = parseFloat(percentParam.split('=')[1]);
+            if (!isNaN(percent) && percent > 0 && percent <= 100) {
+                currentPercentage = percent / 100;
+            }
+        }
+
+        // Process each line for calculations
+        lines.forEach(line => {
+            const parts = line.split(' ').filter(part => part.trim() !== '');
+            parts.forEach(part => {
+                const price = parseFloat(part);
+                if (!isNaN(price) && price > 0) {
+                    const offer = calculateOffer(price, currentPercentage, currentExchangeRate);
+                    calculations.push(formatCalculation(price, currentPercentage, currentExchangeRate, offer));
+                }
+            });
+        });
+
+        if (calculations.length > 0) {
+            responseMsg = `*Price Calculations*\n\n${calculations.join('\n')}`;
+            if (calculations.length > 1) {
+                responseMsg += `\nTotal Calculations: ${calculations.length}`;
             }
         } else {
-            responseMsg = 'Please provide a price to calculate. Example: /calculate 15000 or /calculate 15000 92.5';
+            responseMsg = `Usage:\n/calculate [rate=exchange_rate] [p=percentage] price1\nprice2\nprice3\n\nExamples:\n/calculate 15000\n/calculate rate=5.45 p=92.5 15000\n/calculate 15000\n30000\n45000`;
         }
     } else if (incomingMsg.toLowerCase() === '/help') {
-        responseMsg = `*Valuation Bot Help*\n\n- For most items, I offer between 92% - 93.5% of the maximum price.\n\n- To calculate an offer, use:\n/calculate [Buff Price] [Percentage (optional)]\n\nExamples:\n/calculate 15000 (uses default 93%)\n/calculate 15000 92.5 (uses 92.5%)`;
+        responseMsg = `*Valuation Bot Help*\n\n- For most items, I offer between 92% - 93.5% of the maximum price.\n\n- To calculate an offer, use:\n/calculate [rate=exchange_rate] [p=percentage] price1\nprice2\nprice3\n\nExamples:\n/calculate 15000 (uses default ${(DEFAULT_PERCENTAGE * 100)}% and rate ${DEFAULT_EXCHANGE_RATE})\n/calculate rate=5.45 p=92.5 15000\n/calculate 15000\n30000\n45000`;
     } else {
         responseMsg = 'Welcome to the Valuation Bot! Use /calculate [price] to get an offer, or /help for more information.';
     }
@@ -94,7 +128,7 @@ app.post('/twilio-webhook', (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
-    console.log(`Webhook URL: https://a39a-103-92-41-13.ngrok-free.app/twilio-webhook`);
+    console.log(`Webhook URL: ${process.env.WEBHOOK_URL}`);
 });
 
 // Send an initial test message
