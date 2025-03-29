@@ -93,15 +93,19 @@ app.post('/twilio-webhook', (req, res) => {
                 const price = parseFloat(part);
                 if (!isNaN(price) && price > 0) {
                     const offer = calculateOffer(price, currentPercentage, currentExchangeRate);
-                    calculations.push(formatCalculation(price, currentPercentage, currentExchangeRate, offer));
+                    calculations.push({
+                        text: formatCalculation(price, currentPercentage, currentExchangeRate, offer),
+                        offer: offer.toFixed(2)
+                    });
                 }
             });
         });
 
         if (calculations.length > 0) {
-            responseMsg = `*Price Calculations*\n\n${calculations.join('\n')}`;
+            responseMsg = `*Price Calculations*\n\n${calculations.map(calc => calc.text).join('\n')}`;
             if (calculations.length > 1) {
-                responseMsg += `\nTotal Calculations: ${calculations.length}`;
+                const allOffers = calculations.map(calc => calc.offer).join(', ');
+                responseMsg += `\nTotal Calculations: ${calculations.length}\nAll Offers: SGD ${allOffers}`;
             }
         } else {
             responseMsg = `Usage:\n/calculate [rate=exchange_rate] [p=percentage] price1\nprice2\nprice3\n\nExamples:\n/calculate 15000\n/calculate rate=5.45 p=92.5 15000\n/calculate 15000\n30000\n45000`;
