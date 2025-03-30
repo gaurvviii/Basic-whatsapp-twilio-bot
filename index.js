@@ -1,7 +1,11 @@
 require('dotenv').config();
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const client = require('twilio')(accountSid, authToken);
+
+// Initialize a single Twilio client
+const twilioClient = require('twilio')(
+    process.env.TWILIO_ACCOUNT_SID,
+    process.env.TWILIO_AUTH_TOKEN
+);
+
 const express = require('express');
 const bodyParser = require('body-parser');
 
@@ -117,7 +121,7 @@ app.post('/twilio-webhook', (req, res) => {
     }
 
     // Send the response
-    client.messages
+    twilioClient.messages
         .create({
             body: responseMsg,
             from: process.env.TWILIO_WHATSAPP_FROM,
@@ -135,12 +139,20 @@ app.listen(PORT, () => {
     console.log(`Webhook URL: ${process.env.WEBHOOK_URL}`);
 });
 
-// Send an initial test message
-client.messages
-    .create({
-        body: 'Valuation Bot is now online! Send /help for instructions.',
-        from: process.env.TWILIO_WHATSAPP_FROM,
-        to: process.env.TWILIO_WHATSAPP_TO
-    })
-    .then(message => console.log(message.sid))
-    .catch(error => console.error(error));
+// Send an initial test message to all recipients
+const recipients = [
+    process.env.TWILIO_WHATSAPP_TO_1,
+    process.env.TWILIO_WHATSAPP_TO_2
+].filter(recipient => recipient && recipient.trim() !== '');
+
+// Send startup messages to all recipients
+recipients.forEach(recipient => {
+    twilioClient.messages
+        .create({
+            body: 'Valuation Bot is now online! Send /help for instructions.',
+            from: process.env.TWILIO_WHATSAPP_FROM,
+            to: recipient
+        })
+        .then(message => console.log(`Startup message sent to ${recipient} with SID: ${message.sid}`))
+        .catch(error => console.error(`Error sending startup message to ${recipient}: ${error}`));
+});
