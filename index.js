@@ -11,6 +11,54 @@ console.log('Using Twilio credentials:', {
 
 const twilioClient = require('twilio')(accountSid, authToken);
 
+// Function to fetch the Twilio WhatsApp sandbox number
+async function getWhatsAppSandboxNumber() {
+    try {
+        console.log('Fetching WhatsApp sandbox info from Twilio API...');
+        
+        // Fetch the sandbox info from Twilio API
+        const sandbox = await twilioClient.messaging.v1.services('MGxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
+            .fetch();
+            
+        return sandbox.inboundMethod === 'POST' ? 
+            sandbox.inboundRequestUrl : 
+            'whatsapp:+unknown'; // Return unknown if API call doesn't return expected data
+    } catch (error) {
+        console.error('Error fetching WhatsApp sandbox info:', error);
+        return 'whatsapp:+unknown';
+    }
+}
+
+// Alternate method to fetch the WhatsApp sandbox phone number
+async function getWhatsAppPhoneNumber() {
+    try {
+        console.log('Fetching WhatsApp phone number from Twilio API...');
+        
+        // Get information about recent messages to find the FROM number
+        const messages = await twilioClient.messages.list({
+            limit: 10
+        });
+        
+        // Find the first WhatsApp message sent from our system
+        const outboundMsg = messages.find(msg => 
+            msg.direction === 'outbound-api' && 
+            msg.from && 
+            msg.from.startsWith('whatsapp:')
+        );
+        
+        if (outboundMsg && outboundMsg.from) {
+            console.log('Found WhatsApp FROM number from recent messages:', outboundMsg.from);
+            return outboundMsg.from;
+        } else {
+            console.warn('No recent outbound messages found');
+            return 'whatsapp:+unknown';
+        }
+    } catch (error) {
+        console.error('Error fetching WhatsApp phone number:', error);
+        return 'whatsapp:+unknown';
+    }
+}
+
 const express = require('express');
 const bodyParser = require('body-parser');
 
@@ -80,7 +128,7 @@ async function getSandboxParticipants() {
     }
 }
 
-app.post('/twilio-webhook', (req, res) => {
+app.post('/twilio-webhook', async (req, res) => {
     console.log('Received webhook request:', {
         headers: req.headers,
         body: req.body
@@ -100,9 +148,13 @@ app.post('/twilio-webhook', (req, res) => {
     
     const incomingMsg = req.body.Body.trim();
     const from = req.body.From || 'whatsapp:+your_whatsapp_number_here'; // Default fallback
+    
+    // Get the FROM number dynamically from the Twilio API
+    const fromNumber = await getWhatsAppPhoneNumber();
     let responseMsg = '';
 
     console.log(`Received message from ${from}: ${incomingMsg}`);
+    console.log(`Will respond using Twilio number: ${fromNumber}`);
 
     // Check if the message starts with /calculate
     if (incomingMsg.startsWith('/calculate')) {
@@ -162,11 +214,15 @@ app.post('/twilio-webhook', (req, res) => {
         responseMsg = 'Welcome to the Valuation Bot! Use /calculate [price] to get an offer, or /help for more information.';
     }
 
+    // Remove the message showing FROM number
+    // const fromNumberFormatted = fromNumber ? fromNumber.replace('whatsapp:', '') : 'Unknown';
+    // responseMsg += `\n\n_Message sent from: ${fromNumberFormatted}_`;
+
     // Send the response
     twilioClient.messages
         .create({
             body: responseMsg,
-            from: process.env.TWILIO_WHATSAPP_FROM,
+            from: fromNumber,
             to: from
         })
         .then(message => console.log(`Message sent with SID: ${message.sid}`))
@@ -180,15 +236,22 @@ app.listen(PORT, async () => {
     console.log(`Server is running on port ${PORT}`);
     console.log(`Webhook URL: ${process.env.WEBHOOK_URL}`);
     
+    // Get FROM number dynamically from the Twilio API
+    const fromNumber = await getWhatsAppPhoneNumber();
+    console.log(`Twilio WhatsApp FROM number: ${fromNumber}`);
+    
     // Get all sandbox participants as recipients
     const recipients = await getSandboxParticipants();
     
     // Send startup messages to all recipients
     recipients.forEach(recipient => {
+        // Remove the message showing FROM number formatting
+        // const fromNumberFormatted = fromNumber ? fromNumber.replace('whatsapp:', '') : 'Unknown';
+        
         twilioClient.messages
             .create({
-                body: 'Valuation Bot is now online! Send /help for instructions.',
-                from: process.env.TWILIO_WHATSAPP_FROM,
+                body: `Valuation Bot is now online! Send /help for instructions.`,
+                from: fromNumber,
                 to: recipient
             })
             .then(message => console.log(`Startup message sent to ${recipient} with SID: ${message.sid}`))
