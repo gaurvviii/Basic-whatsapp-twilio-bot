@@ -1,10 +1,15 @@
 require('dotenv').config();
 
-// Initialize a single Twilio client
-const twilioClient = require('twilio')(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-);
+// Initialize a single Twilio client with more flexible environment variable handling
+const accountSid = process.env.TWILIO_ACCOUNT_SID || process.env.TWILIO_ACCOUNT_SID_ || process.env.TWILIO_ACCOUNT_SID_1;
+const authToken = process.env.TWILIO_AUTH_TOKEN || process.env.TWILIO_AUTH_TOKEN_ || process.env.TWILIO_AUTH_TOKEN_1;
+
+console.log('Using Twilio credentials:', { 
+    accountSid: accountSid ? ' Found' : ' Missing', 
+    authToken: authToken ? ' Found' : ' Missing' 
+});
+
+const twilioClient = require('twilio')(accountSid, authToken);
 
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -36,6 +41,43 @@ function calculateOffer(buffPrice, percentage = DEFAULT_PERCENTAGE, exchangeRate
 // Function to format calculation result
 function formatCalculation(buffPrice, percentage, exchangeRate, offer) {
     return `Buff Price: ${buffPrice}\nPercentage: ${(percentage * 100).toFixed(1)}%\nExchange Rate: ${exchangeRate}\nOffer: SGD ${offer.toFixed(2)}\n`;
+}
+
+// Function to get all WhatsApp sandbox participants
+async function getSandboxParticipants() {
+    try {
+        console.log('Fetching WhatsApp sandbox participants from Twilio API...');
+        
+        // Get all inbound participants from the Twilio conversation/WhatsApp
+        const inboundNumbers = new Set();
+        
+        // Fetch recent messages to identify active participants
+        const messages = await twilioClient.messages.list({
+            limit: 100 // Fetch last 100 messages to find participants
+        });
+        
+        // Extract unique WhatsApp numbers that have sent messages to our system
+        messages.forEach(message => {
+            // Only consider WhatsApp messages
+            if (message.from && message.from.startsWith('whatsapp:')) {
+                inboundNumbers.add(message.from);
+            }
+        });
+        
+        const participants = Array.from(inboundNumbers);
+        
+        if (participants.length === 0) {
+            console.warn('No WhatsApp participants found in recent messages!');
+            console.warn('Make sure users have joined your sandbox by sending a message first.');
+        } else {
+            console.log('Found WhatsApp participants:', participants);
+        }
+        
+        return participants;
+    } catch (error) {
+        console.error('Error fetching WhatsApp participants:', error);
+        return [];
+    }
 }
 
 app.post('/twilio-webhook', (req, res) => {
@@ -134,25 +176,22 @@ app.post('/twilio-webhook', (req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`Server is running on port ${PORT}`);
     console.log(`Webhook URL: ${process.env.WEBHOOK_URL}`);
-});
-
-// Send an initial test message to all recipients
-const recipients = [
-    process.env.TWILIO_WHATSAPP_TO_1,
-    process.env.TWILIO_WHATSAPP_TO_2
-].filter(recipient => recipient && recipient.trim() !== '');
-
-// Send startup messages to all recipients
-recipients.forEach(recipient => {
-    twilioClient.messages
-        .create({
-            body: 'Valuation Bot is now online! Send /help for instructions.',
-            from: process.env.TWILIO_WHATSAPP_FROM,
-            to: recipient
-        })
-        .then(message => console.log(`Startup message sent to ${recipient} with SID: ${message.sid}`))
-        .catch(error => console.error(`Error sending startup message to ${recipient}: ${error}`));
+    
+    // Get all sandbox participants as recipients
+    const recipients = await getSandboxParticipants();
+    
+    // Send startup messages to all recipients
+    recipients.forEach(recipient => {
+        twilioClient.messages
+            .create({
+                body: 'Valuation Bot is now online! Send /help for instructions.',
+                from: process.env.TWILIO_WHATSAPP_FROM,
+                to: recipient
+            })
+            .then(message => console.log(`Startup message sent to ${recipient} with SID: ${message.sid}`))
+            .catch(error => console.error(`Error sending startup message to ${recipient}: ${error}`));
+    });
 });
