@@ -237,6 +237,7 @@ app.post('/twilio-webhook', async (req, res) => {
         let currentPercentage = userPrefs.percentage;
         let rateUpdated = false;
         let percentageUpdated = false;
+        let temporaryCalculation = false;
 
         // Process first line for potential parameters
         const firstLine = lines[0].split(' ').filter(part => part.trim() !== '');
@@ -261,8 +262,13 @@ app.post('/twilio-webhook', async (req, res) => {
             }
         }
 
-        // Update user preferences if parameters were provided
-        if (rateUpdated || percentageUpdated) {
+        // Check if this is a temporary calculation (includes % symbol in the percentage parameter)
+        if (percentParam && percentParam.includes('%')) {
+            temporaryCalculation = true;
+        }
+
+        // Update user preferences if parameters were provided and it's not a temporary calculation
+        if ((rateUpdated || percentageUpdated) && !temporaryCalculation) {
             updateUserPreferences(userId, 
                 rateUpdated ? currentExchangeRate : undefined, 
                 percentageUpdated ? currentPercentage * 100 : undefined);
@@ -290,8 +296,13 @@ app.post('/twilio-webhook', async (req, res) => {
                 responseMsg += `\nTotal Calculations: ${calculations.length}\nAll Offers: SGD ${allOffers}`;
             }
             
-            // Add a note if custom values were used
-            if (currentExchangeRate !== DEFAULT_EXCHANGE_RATE || currentPercentage !== DEFAULT_PERCENTAGE) {
+            // Add a note about the values used
+            if (temporaryCalculation) {
+                responseMsg += `\n\n_Using temporary values: ${(currentPercentage * 100).toFixed(1)}% and rate ${currentExchangeRate}_`;
+                responseMsg += `\n_Your saved settings remain unchanged: ${(userPrefs.percentage * 100).toFixed(1)}% and rate ${userPrefs.exchangeRate}_`;
+            } else if (currentExchangeRate !== userPrefs.exchangeRate || currentPercentage !== userPrefs.percentage) {
+                responseMsg += `\n\n_Settings updated to: ${(currentPercentage * 100).toFixed(1)}% and rate ${currentExchangeRate}_`;
+            } else {
                 responseMsg += `\n\n_Using your saved preferences: ${(currentPercentage * 100).toFixed(1)}% and rate ${currentExchangeRate}_`;
             }
         } else {
@@ -357,11 +368,12 @@ app.post('/twilio-webhook', async (req, res) => {
     } else if (incomingMsg.toLowerCase() === '/help') {
         responseMsg = `*Valuation Bot Help*\n\n- For most items, I offer between 92% - 93.5% of the maximum price.\n\n*Commands:*\n\n` +
                       `📊 */calculate* [price1] [price2]...\n   Calculate offers using your current settings\n\n` +
+                      `📊 */calculate rate=X.XX p=XX.X%* [price1] [price2]...\n   Calculate offers using temporary values (won't update your settings)\n\n` +
                       `⚙️ */settings*\n   View your current settings\n\n` +
                       `🔄 */settings [preset]*\n   Apply a preset configuration\n\n` +
                       `✏️ */set rate=X.XX p=XX.X*\n   Directly update your settings\n\n` +
                       `🔙 */reset*\n   Reset to default settings\n\n` +
-                      `*Examples:*\n/calculate 15000\n/set rate=5.45 p=92.5\n/settings high`;
+                      `*Examples:*\n/calculate 15000\n/calculate rate=5.45 p=92.5% 15000\n/set rate=5.45 p=92.5\n/settings high`;
     } else {
         responseMsg = 'Welcome to the Valuation Bot! 👋\n\n' +
                       '💰 Use */calculate [price]* to get an offer\n' +
